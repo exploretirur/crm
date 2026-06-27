@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EduTrack — Computer Institute Management System</title>
+<title>Explore Learning — Computer Institute Management System</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -338,11 +338,20 @@ tr:hover td { background: #f8fafd; }
 /* MASTER DATA */
 .master-item { display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid #f1f5f9; }
 .master-item:last-child { border-bottom:none; }
+/* SUBJECTS TABLE */
+.subjects-table { width:100%; border-collapse:collapse; margin-top:4px; }
+.subjects-table th { background:var(--surface); font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; padding:7px 10px; text-align:left; }
+.subjects-table td { padding:9px 10px; font-size:13px; border-bottom:1px solid #f1f5f9; }
+.subjects-table tr:last-child td { border-bottom:none; }
 .master-badge { width:34px; height:34px; border-radius:8px; background:var(--navy); color:var(--teal-light); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; flex-shrink:0; }
 /* MARKS */
-.marks-student-row { display:grid; grid-template-columns:60px 1fr 130px 130px 100px; gap:8px; padding:10px 0; border-bottom:1px solid #f1f5f9; align-items:center; }
-.marks-student-row:last-child { border-bottom:none; }
-.marks-student-row input, .marks-student-row select { padding:7px 10px; font-size:13px; }
+.marks-student-row { display:none; }
+/* SUBJECT MARKS ROW */
+.subject-marks-row { display:grid; grid-template-columns:36px 1fr 90px 90px 90px 80px 70px; gap:6px; padding:10px 0; border-bottom:1px solid #f1f5f9; align-items:center; }
+.subject-marks-row:last-child { border-bottom:none; }
+.subject-marks-row input { padding:7px 10px; font-size:13px; border:1.5px solid var(--border); border-radius:8px; }
+.subject-marks-row input:focus { border-color:var(--teal); outline:none; }
+.subject-marks-row input.fail { border-color:var(--red); background:#fff5f5; }
 /* DASH CHARTS for non-admin */
 .dash-chart-bar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
 .dash-bar-fill { height:24px; background:var(--teal); border-radius:4px; display:flex; align-items:center; padding-left:8px; font-size:11px; color:#fff; font-weight:600; min-width:32px; transition:width 0.5s; }
@@ -355,7 +364,7 @@ tr:hover td { background: #f8fafd; }
 <div id="login-screen">
   <div class="login-wrap">
     <div class="login-logo">
-      <h1>EduTrack</h1>
+      <h1>Explore Learning</h1>
       <p>Computer Institute Management</p>
     </div>
     <div class="login-card">
@@ -385,7 +394,7 @@ tr:hover td { background: #f8fafd; }
 <!-- SIDEBAR -->
 <aside class="sidebar">
   <div class="sidebar-brand">
-    <h1>EduTrack</h1>
+    <h1>Explore Learning</h1>
     <p>Institute Management</p>
   </div>
   <div class="user-info-sidebar">
@@ -674,7 +683,7 @@ tr:hover td { background: #f8fafd; }
         <button class="btn btn-primary" onclick="window.print()">🖨️ Print Receipt</button>
       </div>
       <div class="receipt" id="receipt-content">
-        <div class="receipt-header"><h2 id="receipt-inst-name">EduTrack Institute</h2><p>Payment Receipt</p></div>
+        <div class="receipt-header"><h2 id="receipt-inst-name">Explore Learning</h2><p>Payment Receipt</p></div>
         <div class="receipt-body" id="receipt-body"><p style="color:var(--muted);text-align:center;padding:20px 0;">Select a receipt above</p></div>
         <div class="receipt-footer" id="receipt-footer-text"><p>Thank you. This is a computer generated receipt.</p></div>
       </div>
@@ -868,7 +877,7 @@ tr:hover td { background: #f8fafd; }
         <!-- Marks card — all roles see it -->
         <div class="card" id="sd-marks-card">
           <div class="card-header"><div class="card-title"><span class="icon">🏆</span> Marks & Grades</div></div>
-          <div class="table-wrap"><table><thead><tr><th>Subject</th><th>Max Marks</th><th>Obtained</th><th>%</th><th>Grade</th><th>Entered By</th></tr></thead><tbody id="sd-marks-log"></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>Subject</th><th>Exam</th><th>Theory</th><th>Practical</th><th>Total</th><th>%</th><th>Grade</th><th>By</th></tr></thead><tbody id="sd-marks-log"></tbody></table></div>
         </div>
         <!-- Certificate status -->
         <div class="card" id="sd-cert-card">
@@ -893,58 +902,84 @@ tr:hover td { background: #f8fafd; }
     <!-- ===== MARKS ENTRY ===== -->
     <div id="page-marks" class="page">
       <div id="marks-alert"></div>
+
+      <!-- Step 1: Select Student -->
       <div class="card">
-        <div class="card-header"><div class="card-title"><span class="icon">📅</span> Session</div></div>
-        <div class="form-grid-3">
-          <div class="form-group"><label>Batch <span class="required">*</span></label>
-            <select id="mk-batch" onchange="loadMarksStudents()">
-              <option value="">Select batch</option>
+        <div class="card-header"><div class="card-title"><span class="icon">👤</span> Select Student</div></div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Course <span class="required">*</span></label>
+            <select id="mk-course" onchange="mkOnCourseChange()">
+              <option value="">— Select course —</option>
             </select>
           </div>
-          <div class="form-group"><label>Course <span class="required">*</span></label>
-            <select id="mk-course" onchange="loadMarksStudents()">
-              <option value="">Select course</option>
+          <div class="form-group">
+            <label>Batch (optional filter)</label>
+            <select id="mk-batch" onchange="mkLoadStudents()">
+              <option value="">All Batches</option>
             </select>
           </div>
-          <div class="form-group"><label>Subject / Exam Name <span class="required">*</span></label>
-            <input id="mk-subject" type="text" placeholder="e.g. Unit Test 1, Final Exam">
+          <div class="form-group">
+            <label>Student <span class="required">*</span></label>
+            <select id="mk-student" onchange="mkLoadSubjects()" disabled>
+              <option value="">— Select student —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Exam / Test Name <span class="required">*</span></label>
+            <input id="mk-exam" type="text" placeholder="e.g. Unit Test 1, Final Exam">
           </div>
         </div>
       </div>
-      <div class="card" id="marks-list-card" style="display:none;">
+
+      <!-- Step 2: Subject-wise marks table -->
+      <div class="card" id="marks-subjects-card" style="display:none;">
         <div class="card-header">
-          <div class="card-title"><span class="icon">📋</span> Enter Marks</div>
-          <div style="font-size:12px;color:var(--muted);">Enter marks obtained for each student</div>
+          <div class="card-title"><span class="icon">📋</span> Subject-wise Marks</div>
+          <div id="mk-student-label" style="font-size:13px;color:var(--muted);font-weight:500;"></div>
         </div>
-        <div style="display:grid;grid-template-columns:60px 1fr 130px 130px 100px;gap:8px;padding:8px 0;border-bottom:1.5px solid var(--border);font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;">
-          <span>Roll</span><span>Student Name</span><span>Max Marks</span><span>Marks Obtained</span><span>Grade</span>
+        <!-- Header row -->
+        <div style="display:grid;grid-template-columns:36px 1fr 90px 90px 90px 80px 70px;gap:6px;padding:8px 0;border-bottom:2px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;">
+          <span>#</span><span>Subject</span><span>Theory<br><small style="font-size:10px;font-weight:400;">Max</small></span>
+          <span>Theory<br><small style="font-size:10px;font-weight:400;">Obtained</small></span>
+          <span>Practical<br><small style="font-size:10px;font-weight:400;">Obtained</small></span>
+          <span>Total</span><span>Grade</span>
         </div>
         <div id="marks-rows"></div>
+        <!-- Summary row -->
+        <div id="marks-summary" style="display:none;margin-top:14px;padding:12px 14px;background:var(--surface);border-radius:10px;display:flex;gap:24px;flex-wrap:wrap;font-size:13px;">
+          <span>Total: <strong id="mk-sum-total">—</strong></span>
+          <span>Max: <strong id="mk-sum-max">—</strong></span>
+          <span>Percentage: <strong id="mk-sum-pct">—</strong></span>
+          <span>Overall Grade: <strong id="mk-sum-grade">—</strong></span>
+        </div>
         <div class="action-bar" style="margin-top:16px;">
-          <button class="btn btn-outline" onclick="autoGrade()">🎯 Auto Grade</button>
-          <button class="btn btn-teal" onclick="submitMarks()" id="marks-submit-btn">💾 Save Marks</button>
+          <button class="btn btn-outline" onclick="mkAutoGradeAll()">🎯 Auto Grade All</button>
+          <button class="btn btn-teal" onclick="mkSubmitMarks()" id="marks-submit-btn">💾 Save Marks</button>
         </div>
       </div>
+
       <div id="marks-empty" style="display:none;">
-        <div class="card" style="text-align:center;padding:40px;"><div style="font-size:40px;margin-bottom:12px;">📚</div><p style="color:var(--muted);">No students for this batch and course.</p></div>
+        <div class="card" style="text-align:center;padding:40px;">
+          <div style="font-size:40px;margin-bottom:12px;">📖</div>
+          <p style="color:var(--muted);" id="marks-empty-msg">No subjects defined for this course. Add subjects in Master Data → Courses.</p>
+        </div>
       </div>
     </div>
 
     <!-- ===== MASTER DATA (Admin only) ===== -->
     <div id="page-master" class="page">
       <div id="master-alert"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;">
 
-        <!-- COURSES -->
+      <!-- Row 1: Courses + Batches -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
         <div class="card">
           <div class="card-header">
             <div class="card-title"><span class="icon">📚</span> Courses</div>
-            <button class="btn btn-teal" onclick="openMasterModal('course')" style="padding:6px 12px;font-size:12px;">+ Add</button>
+            <button class="btn btn-teal" onclick="openMasterModal('course')" style="padding:6px 12px;font-size:12px;">+ Add Course</button>
           </div>
           <div id="master-courses-list"></div>
         </div>
-
-        <!-- BATCHES -->
         <div class="card">
           <div class="card-header">
             <div class="card-title"><span class="icon">🕐</span> Batches</div>
@@ -952,14 +987,66 @@ tr:hover td { background: #f8fafd; }
           </div>
           <div id="master-batches-list"></div>
         </div>
+      </div>
 
-        <!-- STAFF -->
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title"><span class="icon">👤</span> Staff List</div>
-            <button class="btn btn-teal" onclick="openMasterModal('staff')" style="padding:6px 12px;font-size:12px;">+ Add</button>
+      <!-- Row 2: Course Subjects (full width) -->
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📖</span> Course Subjects</div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <select id="master-subject-course" onchange="renderSubjectsList()" style="min-width:200px;font-size:13px;padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;">
+              <option value="">— Select a course —</option>
+            </select>
+            <button class="btn btn-teal" onclick="openSubjectModal(null)" style="padding:6px 14px;font-size:12px;">+ Add Subject</button>
           </div>
-          <div id="master-staff-list"></div>
+        </div>
+        <div id="master-subjects-list"><p style="color:var(--muted);font-size:13px;padding:8px 0;">Select a course above to manage its subjects.</p></div>
+      </div>
+
+      <!-- Row 3: Staff -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">👤</span> Staff List</div>
+          <button class="btn btn-teal" onclick="openMasterModal('staff')" style="padding:6px 12px;font-size:12px;">+ Add</button>
+        </div>
+        <div id="master-staff-list"></div>
+      </div>
+    </div>
+
+    <!-- Subject Modal -->
+    <div class="modal-backdrop" id="subject-modal">
+      <div class="modal" style="max-width:500px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+          <h3 id="subject-modal-title">Add Subject</h3>
+          <button class="btn btn-outline" onclick="closeModal('subject-modal')" style="padding:4px 12px;font-size:16px;">✕</button>
+        </div>
+        <div id="subject-modal-alert"></div>
+        <div class="form-grid">
+          <div class="form-group full">
+            <label>Subject Name <span class="required">*</span></label>
+            <input id="sf-name" type="text" placeholder="e.g. Computer Fundamentals">
+          </div>
+          <div class="form-group">
+            <label>Theory Max Marks</label>
+            <input id="sf-theory-max" type="number" value="100" min="0" placeholder="100">
+          </div>
+          <div class="form-group">
+            <label>Theory Pass Marks</label>
+            <input id="sf-theory-pass" type="number" value="35" min="0" placeholder="35">
+          </div>
+          <div class="form-group">
+            <label>Practical Max Marks</label>
+            <input id="sf-practical-max" type="number" value="50" min="0" placeholder="50">
+          </div>
+          <div class="form-group">
+            <label>Practical Pass Marks</label>
+            <input id="sf-practical-pass" type="number" value="18" min="0" placeholder="18">
+          </div>
+        </div>
+        <input type="hidden" id="sf-edit-id">
+        <div class="action-bar">
+          <button class="btn btn-outline" onclick="closeModal('subject-modal')">Cancel</button>
+          <button class="btn btn-teal" onclick="saveSubject()">💾 Save Subject</button>
         </div>
       </div>
     </div>
@@ -1119,7 +1206,7 @@ tr:hover td { background: #f8fafd; }
         <div class="card-header"><div class="card-title"><span class="icon">🏫</span> Institute Information</div></div>
         <div class="form-group" style="max-width:600px;">
           <label>Institute Name</label>
-          <input id="gs-inst-name" type="text" placeholder="EduTrack Computer Institute">
+          <input id="gs-inst-name" type="text" placeholder="Explore Learning">
         </div>
         <div class="form-group" style="max-width:600px;margin-top:14px;">
           <label>Institute Contact / Address</label>
@@ -1151,7 +1238,7 @@ tr:hover td { background: #f8fafd; }
         <div class="form-grid" style="max-width:600px;margin-bottom:16px;">
           <div class="form-group">
             <label>Export Filename</label>
-            <input id="excel-filename" type="text" placeholder="EduTrack_Data" value="EduTrack_Data">
+            <input id="excel-filename" type="text" placeholder="Explore_Data" value="Explore_Data">
           </div>
           <div class="form-group">
             <label>Include Sheets</label>
@@ -1298,10 +1385,10 @@ const DEFAULT_USERS = [
 // Each teacher logs in with their own username/password.
 
 function getUsers() {
-  const stored = localStorage.getItem('edutrack_users');
+  const stored = localStorage.getItem('explore_users');
   return stored ? JSON.parse(stored) : DEFAULT_USERS;
 }
-function saveUsers(u) { localStorage.setItem('edutrack_users', JSON.stringify(u)); }
+function saveUsers(u) { localStorage.setItem('explore_users', JSON.stringify(u)); }
 
 let currentUser = null;
 
@@ -1464,10 +1551,10 @@ let firestoreDB = null;
 let firebaseInitialized = false;
 
 function getFirebaseConfig() {
-  try { return JSON.parse(localStorage.getItem('edutrack_firebase_config') || 'null'); } catch(e) { return null; }
+  try { return JSON.parse(localStorage.getItem('explore_firebase_config') || 'null'); } catch(e) { return null; }
 }
 function saveFirebaseConfig(config) {
-  localStorage.setItem('edutrack_firebase_config', JSON.stringify(config));
+  localStorage.setItem('explore_firebase_config', JSON.stringify(config));
 }
 
 async function initFirebase() {
@@ -1483,7 +1570,7 @@ async function initFirebase() {
     }
     const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
     const { getFirestore, collection, getDocs, setDoc, doc, deleteDoc } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
-    firebaseApp = initializeApp(config, 'edutrack-' + Date.now());
+    firebaseApp = initializeApp(config, 'explore-' + Date.now());
     firestoreDB = getFirestore(firebaseApp);
     window._fs = { getFirestore, collection, getDocs, setDoc, doc, deleteDoc, firestoreDB };
     firebaseInitialized = true;
@@ -1536,9 +1623,9 @@ async function fbSaveDoc(colName, docId, data) {
 // DATA STORE — localStorage (cache) + Firebase (cloud)
 // ============================================================
 const DB = {
-  get: k => { try { return JSON.parse(localStorage.getItem('edutrack_' + k) || '[]'); } catch(e) { return []; } },
+  get: k => { try { return JSON.parse(localStorage.getItem('explore_' + k) || '[]'); } catch(e) { return []; } },
   set: async (k, v) => {
-    localStorage.setItem('edutrack_' + k, JSON.stringify(v));
+    localStorage.setItem('explore_' + k, JSON.stringify(v));
     // Mirror to Firestore
     const colMap = {
       students:'students', payments:'payments', attendance:'attendance',
@@ -1550,8 +1637,8 @@ const DB = {
       fbSaveCollection(colMap[k], v).catch(e => console.warn('Firebase sync skipped:', e.message));
     }
   },
-  cfg: () => { try { return JSON.parse(localStorage.getItem('edutrack_config') || '{}'); } catch(e) { return {}; } },
-  saveCfg: v => localStorage.setItem('edutrack_config', JSON.stringify(v))
+  cfg: () => { try { return JSON.parse(localStorage.getItem('explore_config') || '{}'); } catch(e) { return {}; } },
+  saveCfg: v => localStorage.setItem('explore_config', JSON.stringify(v))
 };
 
 async function loadAllFromFirebase() {
@@ -1561,7 +1648,7 @@ async function loadAllFromFirebase() {
   for (const k of keys) {
     const data = await fbGetCollection(k);
     if (data && data.length > 0) {
-      localStorage.setItem('edutrack_' + k, JSON.stringify(data));
+      localStorage.setItem('explore_' + k, JSON.stringify(data));
     }
   }
   // Reload in-memory vars
@@ -1656,7 +1743,7 @@ function showPullStatus(type, msg) {
 function saveSettings() {
   if (!canModify()) { showAlert('global-alert','error','❌ Only Admin can change system settings.'); return; }
   cfg = {
-    instName: document.getElementById('gs-inst-name').value.trim() || 'EduTrack Institute',
+    instName: document.getElementById('gs-inst-name').value.trim() || 'Explore Learning',
     instContact: document.getElementById('gs-inst-contact').value.trim()
   };
   DB.saveCfg(cfg);
@@ -2162,7 +2249,7 @@ function loadReceipt() {
   const totalPaid = payments.filter(x=>x.rollNo===p.rollNo).reduce((a,x)=>a+parseFloat(x.amount||0),0);
   const net = s ? parseFloat(s.totalFees||0)-parseFloat(s.concession||0) : 0;
   const bal = net-totalPaid;
-  const instName = cfg.instName || 'EduTrack Institute';
+  const instName = cfg.instName || 'Explore Learning';
   document.getElementById('receipt-inst-name').textContent = instName;
   document.getElementById('receipt-footer-text').innerHTML = `<p>Thank you for your payment. This is a computer generated receipt.</p><p style="margin-top:4px;">${instName}${cfg.instContact?' | '+cfg.instContact:''}</p>`;
   document.getElementById('receipt-body').innerHTML=`
@@ -2398,13 +2485,15 @@ function loadStudentDashboard() {
     const gradeColor = m.grade==='F'?'chip-red':m.grade==='O'||m.grade==='A+'?'chip-green':m.grade==='A'||m.grade==='B+'?'chip-blue':'chip-amber';
     return `<tr>
       <td><strong>${m.subject}</strong></td>
-      <td>${m.maxMarks}</td>
-      <td>${m.obtainedMarks}</td>
+      <td style="font-size:12px;color:var(--muted);">${m.examName||m.exam||'—'}</td>
+      <td>${m.theoryObt!==undefined ? m.theoryObt+'/'+m.theoryMax : (m.obtainedMarks||'—')}</td>
+      <td>${m.practicalObt!==undefined ? m.practicalObt+'/'+m.practicalMax : '—'}</td>
+      <td><strong>${m.total!==undefined ? m.total+'/'+(parseFloat(m.theoryMax||0)+parseFloat(m.practicalMax||0)) : (m.obtainedMarks||'—')}</strong></td>
       <td><strong>${pct}%</strong></td>
       <td><span class="chip ${gradeColor}">${m.grade||'—'}</span></td>
       <td style="font-size:12px;color:var(--muted);">${m.enteredBy||'—'}</td>
     </tr>`;
-  }).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px;">No marks records</td></tr>';
+  }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px;">No marks records</td></tr>';
 
   // --- Certificate status ---
   const cert = certificates.find(c=>c.rollNo===s.rollNo);
@@ -2636,7 +2725,7 @@ async function syncUsersToFirebase() {
 // ============================================================
 async function exportToExcel() {
   const scope = document.getElementById('excel-scope').value;
-  const baseName = (document.getElementById('excel-filename').value.trim() || 'EduTrack_Data');
+  const baseName = (document.getElementById('excel-filename').value.trim() || 'Explore_Data');
   const statusEl = document.getElementById('excel-status');
   statusEl.innerHTML = '<div class="alert alert-info">⏳ Building Excel workbook...</div>';
 
@@ -2710,7 +2799,7 @@ async function exportToExcel() {
       ['Roll No','Student Name','Course','Cert No','Given Date','Given By','Status','Updated At']);
     // Summary sheet
     const summary = [
-      ['EduTrack Institute Management — Data Export'],
+      ['Explore Institute Management — Data Export'],
       ['Exported At', timestamp],
       [''],
       ['Module', 'Record Count'],
@@ -2838,7 +2927,7 @@ function parseCSVLine(line) {
 // MASTER DATA
 // ============================================================
 function populateCourseBatchSelects() {
-  const courseSelects = ['adm-course','es-course','student-filter-course','ar-course','att-course','mk-course'];
+  const courseSelects = ['adm-course','es-course','student-filter-course','ar-course','att-course','mk-course','master-subject-course'];
   const batchSelects = ['adm-batch','es-batch','att-batch','ar-batch','mk-batch'];
   courseSelects.forEach(id => {
     const sel = document.getElementById(id);
@@ -2860,6 +2949,113 @@ function populateCourseBatchSelects() {
   });
 }
 
+// ============================================================
+// SUBJECT MANAGEMENT (inside Master Data)
+// ============================================================
+function renderSubjectsList() {
+  const courseId = document.getElementById('master-subject-course').value;
+  const container = document.getElementById('master-subjects-list');
+  if (!courseId) {
+    container.innerHTML = '<p style="color:var(--muted);font-size:13px;padding:8px 0;">Select a course above to manage its subjects.</p>';
+    return;
+  }
+  const course = masterData.courses.find(c=>c.id===courseId);
+  if (!course) { container.innerHTML='<p style="color:var(--muted);">Course not found.</p>'; return; }
+  const subs = course.subjects||[];
+  if (!subs.length) {
+    container.innerHTML = `<p style="color:var(--muted);font-size:13px;padding:8px 0;">No subjects yet for <strong>${course.name}</strong>. Click "+ Add Subject" to begin.</p>`;
+    return;
+  }
+  container.innerHTML = `
+    <table class="subjects-table">
+      <thead><tr>
+        <th>#</th><th>Subject Name</th>
+        <th>Theory Max</th><th>Theory Pass</th>
+        <th>Practical Max</th><th>Practical Pass</th>
+        <th style="width:80px;">Actions</th>
+      </tr></thead>
+      <tbody>
+        ${subs.map((sub,i)=>`<tr>
+          <td style="color:var(--muted);font-weight:600;">${i+1}</td>
+          <td><strong>${sub.name}</strong></td>
+          <td>${sub.theoryMax||100}</td><td style="color:var(--muted);">${sub.theoryPass||35}</td>
+          <td>${sub.practicalMax||50}</td><td style="color:var(--muted);">${sub.practicalPass||18}</td>
+          <td style="display:flex;gap:6px;">
+            <button onclick="openSubjectModal('${courseId}',${i})" style="background:none;border:none;cursor:pointer;font-size:15px;" title="Edit">✏️</button>
+            <button onclick="deleteSubject('${courseId}',${i})" style="background:none;border:none;cursor:pointer;font-size:15px;" title="Delete">🗑️</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function openSubjectModal(courseId, editIdx) {
+  // If courseId is null, use the currently selected course
+  const resolvedCourseId = courseId || document.getElementById('master-subject-course').value;
+  if (!resolvedCourseId) { showAlert('master-alert','error','Please select a course first.'); return; }
+  document.getElementById('master-subject-course').value = resolvedCourseId;
+  const course = masterData.courses.find(c=>c.id===resolvedCourseId);
+  if (!course) { showAlert('master-alert','error','Course not found.'); return; }
+  document.getElementById('subject-modal-alert').innerHTML='';
+  if (editIdx !== undefined && editIdx !== null) {
+    const sub = (course.subjects||[])[editIdx];
+    document.getElementById('subject-modal-title').textContent = 'Edit Subject';
+    document.getElementById('sf-name').value = sub.name;
+    document.getElementById('sf-theory-max').value   = sub.theoryMax||100;
+    document.getElementById('sf-theory-pass').value  = sub.theoryPass||35;
+    document.getElementById('sf-practical-max').value  = sub.practicalMax||50;
+    document.getElementById('sf-practical-pass').value = sub.practicalPass||18;
+    document.getElementById('sf-edit-id').value = editIdx;
+  } else {
+    document.getElementById('subject-modal-title').textContent = 'Add Subject';
+    document.getElementById('sf-name').value='';
+    document.getElementById('sf-theory-max').value=100;
+    document.getElementById('sf-theory-pass').value=35;
+    document.getElementById('sf-practical-max').value=50;
+    document.getElementById('sf-practical-pass').value=18;
+    document.getElementById('sf-edit-id').value='';
+  }
+  document.getElementById('subject-modal').classList.add('open');
+}
+
+function saveSubject() {
+  const courseId = document.getElementById('master-subject-course').value;
+  const name     = document.getElementById('sf-name').value.trim();
+  const editIdx  = document.getElementById('sf-edit-id').value;
+  const alertEl  = document.getElementById('subject-modal-alert');
+  if (!courseId) { alertEl.innerHTML='<div class="alert alert-error">Select a course first.</div>'; return; }
+  if (!name)     { alertEl.innerHTML='<div class="alert alert-error">Subject name is required.</div>'; return; }
+  const course = masterData.courses.find(c=>c.id===courseId);
+  if (!course) { alertEl.innerHTML='<div class="alert alert-error">Course not found.</div>'; return; }
+  if (!course.subjects) course.subjects=[];
+  const subData = {
+    id: (editIdx!=='' && course.subjects[editIdx]) ? course.subjects[editIdx].id : 'sub'+Date.now(),
+    name,
+    theoryMax:    parseFloat(document.getElementById('sf-theory-max').value)||100,
+    theoryPass:   parseFloat(document.getElementById('sf-theory-pass').value)||35,
+    practicalMax: parseFloat(document.getElementById('sf-practical-max').value)||50,
+    practicalPass:parseFloat(document.getElementById('sf-practical-pass').value)||18,
+  };
+  if (editIdx !== '') course.subjects[parseInt(editIdx)] = subData;
+  else course.subjects.push(subData);
+  saveMasterData();
+  closeModal('subject-modal');
+  renderMasterData();
+  renderSubjectsList();
+  showAlert('master-alert','success','✅ Subject saved for '+course.name);
+}
+
+function deleteSubject(courseId, idx) {
+  if (!confirm('Delete this subject?')) return;
+  const course = masterData.courses.find(c=>c.id===courseId);
+  if (!course) return;
+  course.subjects.splice(idx,1);
+  saveMasterData();
+  renderSubjectsList();
+  renderMasterData();
+  showAlert('master-alert','success','Subject deleted.');
+}
+
 function saveMasterData() {
   DB.set('master_courses', masterData.courses);
   DB.set('master_batches', masterData.batches);
@@ -2874,7 +3070,7 @@ function renderMasterData() {
       <div class="master-badge">${co.name.slice(0,2).toUpperCase()}</div>
       <div style="flex:1;">
         <div style="font-weight:600;font-size:13.5px;">${co.name}</div>
-        <div style="font-size:11.5px;color:var(--muted);">${co.duration} months · ₹${(co.fee||0).toLocaleString('en-IN')}</div>
+        <div style="font-size:11.5px;color:var(--muted);">${co.duration} months · ₹${(co.fee||0).toLocaleString('en-IN')} · <span style='color:var(--teal);font-weight:600;'>${(co.subjects||[]).length} subject${(co.subjects||[]).length!==1?'s':''}</span></div>
       </div>
       <button onclick="editMaster('course',${i})" style="background:none;border:none;cursor:pointer;font-size:15px;" title="Edit">✏️</button>
       <button onclick="deleteMaster('course',${i})" style="background:none;border:none;cursor:pointer;font-size:15px;" title="Delete">🗑️</button>
@@ -2895,6 +3091,18 @@ function renderMasterData() {
 
   // STAFF
   const sl = document.getElementById('master-staff-list');
+  // Populate course dropdown for subjects section
+  const subCourseFilter = document.getElementById('master-subject-course');
+  if (subCourseFilter) {
+    const prev = subCourseFilter.value;
+    subCourseFilter.innerHTML = '<option value="">— Select a course —</option>' +
+      masterData.courses.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+    if (prev && [...subCourseFilter.options].some(o=>o.value===prev)) {
+      subCourseFilter.value = prev;
+      renderSubjectsList();
+    }
+  }
+
   sl.innerHTML = masterData.staff.length ? masterData.staff.map((st,i) => `
     <div class="master-item">
       <div class="master-avatar" style="width:34px;height:34px;border-radius:50%;background:#065f46;color:#d1fae5;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">${st.name.slice(0,2).toUpperCase()}</div>
@@ -2959,7 +3167,8 @@ function saveMasterItem() {
   let item = {};
   if (masterEditType === 'course') {
     const oldName = masterEditIdx >= 0 ? masterData.courses[masterEditIdx].name : null;
-    item = { id: (masterEditIdx>=0 ? masterData.courses[masterEditIdx].id : 'c'+Date.now()), name, duration: parseInt(document.getElementById('mf-duration').value)||3, fee: parseFloat(document.getElementById('mf-fee').value)||0 };
+    const existingCourse = masterEditIdx>=0 ? masterData.courses[masterEditIdx] : null;
+    item = { id: (existingCourse ? existingCourse.id : 'c'+Date.now()), name, duration: parseInt(document.getElementById('mf-duration').value)||3, fee: parseFloat(document.getElementById('mf-fee').value)||0, subjects: existingCourse ? (existingCourse.subjects||[]) : [] };
     if (masterEditIdx >= 0) masterData.courses[masterEditIdx] = item;
     else masterData.courses.push(item);
     if (oldName && oldName !== name) {
@@ -3155,7 +3364,7 @@ function printSalarySlip(id) {
   const w = window.open('','_blank','width=600,height=700');
   w.document.write(`<!DOCTYPE html><html><head><title>Salary Slip</title>
   <style>body{font-family:sans-serif;padding:30px;font-size:13px;}h2{color:#0f1f3d;}table{width:100%;border-collapse:collapse;margin-top:16px;}td{padding:8px 12px;border-bottom:1px solid #eee;}td:last-child{text-align:right;font-weight:600;}.net{background:#0f1f3d;color:#96fbc4;font-size:16px;font-weight:700;}</style></head><body>
-  <h2>${cfg.instName||'EduTrack Institute'}</h2>
+  <h2>${cfg.instName||'Explore Learning'}</h2>
   <p>Salary Slip — <strong>${s.month}</strong> &nbsp;|&nbsp; Staff: <strong>${s.staffName}</strong></p>
   <table>
     <tr><td>Basic Salary</td><td>₹${(s.basic||0).toLocaleString('en-IN')}</td></tr>
@@ -3171,63 +3380,200 @@ function printSalarySlip(id) {
     <tr class="net"><td colspan="2" style="color:#96fbc4;background:#0f1f3d;padding:12px;">NET PAY &nbsp;|&nbsp; ₹${(s.netPay||0).toLocaleString('en-IN')}</td></tr>
   </table>
   ${s.remarks?'<p style="margin-top:12px;color:#64748b;">Remarks: '+s.remarks+'</p>':''}
-  <p style="margin-top:24px;font-size:11px;color:#94a3b8;">Generated by EduTrack on ${new Date().toLocaleDateString('en-IN')}</p>
+  <p style="margin-top:24px;font-size:11px;color:#94a3b8;">Generated by Explore Learning on ${new Date().toLocaleDateString('en-IN')}</p>
   <script>window.onload=()=>window.print();<\/script></body></html>`);
   w.document.close();
 }
 
 // ============================================================
-// MARKS ENTRY
+// MARKS ENTRY — STUDENT WISE
 // ============================================================
-function loadMarksStudents() {
-  const batch = document.getElementById('mk-batch').value;
+function mkOnCourseChange() {
+  document.getElementById('mk-student').innerHTML = '<option value="">— Select student —</option>';
+  document.getElementById('mk-student').disabled = true;
+  document.getElementById('marks-subjects-card').style.display = 'none';
+  document.getElementById('marks-empty').style.display = 'none';
+  mkLoadStudents();
+}
+
+function mkLoadStudents() {
   const course = document.getElementById('mk-course').value;
-  if (!batch || !course) return;
-  const filtered = students.filter(s=>s.batch===batch && s.course===course && (s.status||'Active')==='Active');
-  const listCard = document.getElementById('marks-list-card');
+  const batch  = document.getElementById('mk-batch').value;
+  const sel    = document.getElementById('mk-student');
+  if (!course) { sel.innerHTML='<option value="">— Select course first —</option>'; sel.disabled=true; return; }
+  const filtered = students.filter(s =>
+    s.course===course &&
+    (!batch || s.batch===batch) &&
+    (s.status||'Active')==='Active'
+  );
+  if (!filtered.length) {
+    sel.innerHTML='<option value="">No active students found</option>'; sel.disabled=true;
+    document.getElementById('marks-empty-msg').textContent='No active students found for this course/batch.';
+    document.getElementById('marks-empty').style.display='block'; return;
+  }
+  document.getElementById('marks-empty').style.display='none';
+  sel.innerHTML='<option value="">— Select student —</option>'+
+    filtered.map(s=>`<option value="${s.rollNo}">${s.fname} ${s.lname} (${s.rollNo})</option>`).join('');
+  sel.disabled=false;
+}
+
+function mkLoadSubjects() {
+  const rollNo = document.getElementById('mk-student').value;
+  const course = document.getElementById('mk-course').value;
+  const subCard = document.getElementById('marks-subjects-card');
   const emptyEl = document.getElementById('marks-empty');
-  if (!filtered.length) { listCard.style.display='none'; emptyEl.style.display='block'; return; }
-  listCard.style.display=''; emptyEl.style.display='none';
-  document.getElementById('marks-rows').innerHTML = filtered.map(s=>`
-    <div class="marks-student-row" data-roll="${s.rollNo}" data-name="${s.fname} ${s.lname}">
-      <div style="font-size:12px;font-weight:600;color:var(--muted);">${s.rollNo}</div>
-      <div style="font-weight:500;">${s.fname} ${s.lname}</div>
-      <input type="number" id="mkmax-${s.rollNo}" placeholder="100" min="0" value="100" oninput="autoGradeRow('${s.rollNo}')">
-      <input type="number" id="mkobt-${s.rollNo}" placeholder="0" min="0" oninput="autoGradeRow('${s.rollNo}')">
-      <select id="mkgrade-${s.rollNo}">
-        <option value="">Grade</option>
-        <option value="O">O (Outstanding)</option>
-        <option value="A+">A+ (Excellent)</option>
-        <option value="A">A (Very Good)</option>
-        <option value="B+">B+ (Good)</option>
-        <option value="B">B (Average)</option>
-        <option value="C">C (Pass)</option>
-        <option value="F">F (Fail)</option>
-      </select>
+  subCard.style.display='none'; emptyEl.style.display='none';
+  if (!rollNo || !course) return;
+
+  const courseObj = masterData.courses.find(c=>c.name===course);
+  const subjects  = (courseObj && courseObj.subjects) ? courseObj.subjects : [];
+  if (!subjects.length) {
+    document.getElementById('marks-empty-msg').textContent =
+      'No subjects defined for "'+course+'". Add subjects in Master Data → Course Subjects.';
+    emptyEl.style.display='block'; return;
+  }
+  const student = students.find(s=>s.rollNo===rollNo);
+  document.getElementById('mk-student-label').textContent =
+    (student ? student.fname+' '+student.lname+' · ' : '') + rollNo + ' | ' + course;
+
+  document.getElementById('marks-rows').innerHTML = subjects.map((sub,i)=>`
+    <div class="subject-marks-row" data-subid="${sub.id}" data-subname="${sub.name}" data-theory-max="${sub.theoryMax||100}" data-theory-pass="${sub.theoryPass||35}" data-practical-max="${sub.practicalMax||50}" data-practical-pass="${sub.practicalPass||18}">
+      <span style="font-size:12px;font-weight:700;color:var(--muted);">${i+1}</span>
+      <div>
+        <div style="font-weight:600;font-size:13.5px;">${sub.name}</div>
+        <div style="font-size:11px;color:var(--muted);">Th: ${sub.theoryMax||100} (pass ${sub.theoryPass||35}) &nbsp;|&nbsp; Pr: ${sub.practicalMax||50} (pass ${sub.practicalPass||18})</div>
+      </div>
+      <div style="font-size:12px;font-weight:600;color:var(--muted);padding:8px 4px;">${sub.theoryMax||100}</div>
+      <input type="number" id="mk-th-${sub.id}" placeholder="0" min="0" max="${sub.theoryMax||100}"
+             oninput="mkCalcRow('${sub.id}')">
+      <input type="number" id="mk-pr-${sub.id}" placeholder="0" min="0" max="${sub.practicalMax||50}"
+             oninput="mkCalcRow('${sub.id}')">
+      <div id="mk-total-${sub.id}" style="font-weight:700;font-size:14px;color:var(--text);">—</div>
+      <div id="mk-grade-${sub.id}">—</div>
     </div>`).join('');
+
+  document.getElementById('marks-summary').style.display='none';
+  subCard.style.display='';
 }
 
-function autoGradeRow(rollNo) {
-  const max = parseFloat(document.getElementById('mkmax-'+rollNo).value)||0;
-  const obt = parseFloat(document.getElementById('mkobt-'+rollNo).value)||0;
-  if (!max) return;
-  const pct = (obt/max)*100;
+function mkCalcRow(subId) {
+  const row = document.querySelector(`[data-subid="${subId}"]`);
+  if (!row) return;
+  const thMax  = parseFloat(row.dataset.theoryMax)||100;
+  const thPass = parseFloat(row.dataset.theoryPass)||35;
+  const prMax  = parseFloat(row.dataset.practicalMax)||50;
+  const prPass = parseFloat(row.dataset.practicalPass)||18;
+  const thObt  = parseFloat(document.getElementById('mk-th-'+subId).value)||0;
+  const prObt  = parseFloat(document.getElementById('mk-pr-'+subId).value)||0;
+  const total  = thObt + prObt;
+  const maxTotal = thMax + prMax;
+  const pct    = maxTotal > 0 ? (total/maxTotal)*100 : 0;
+
+  const thFail = thObt < thPass;
+  const prFail = prObt < prPass;
+  document.getElementById('mk-th-'+subId).classList.toggle('fail', thFail && thObt>0);
+  document.getElementById('mk-pr-'+subId).classList.toggle('fail', prFail && prObt>0);
+
   let grade = 'F';
-  if (pct>=90) grade='O'; else if (pct>=80) grade='A+'; else if (pct>=70) grade='A';
-  else if (pct>=60) grade='B+'; else if (pct>=50) grade='B'; else if (pct>=40) grade='C';
-  document.getElementById('mkgrade-'+rollNo).value = grade;
+  if (!thFail && !prFail) {
+    if (pct>=90) grade='O'; else if (pct>=80) grade='A+'; else if (pct>=70) grade='A';
+    else if (pct>=60) grade='B+'; else if (pct>=50) grade='B'; else if (pct>=40) grade='C';
+  }
+
+  const gColors = { O:'chip-green', 'A+':'chip-green', A:'chip-blue', 'B+':'chip-blue', B:'chip-amber', C:'chip-amber', F:'chip-red' };
+  document.getElementById('mk-total-'+subId).innerHTML = `<strong>${total}/${maxTotal}</strong>`;
+  document.getElementById('mk-grade-'+subId).innerHTML = `<span class="chip ${gColors[grade]||'chip-red'}">${grade}</span>`;
+
+  // Recalculate summary
+  mkUpdateSummary();
 }
 
-function autoGrade() {
-  document.querySelectorAll('[data-roll]').forEach(row => {
-    autoGradeRow(row.dataset.roll);
+function mkUpdateSummary() {
+  const rows = document.querySelectorAll('[data-subid]');
+  let sumTotal=0, sumMax=0, allGraded=true;
+  rows.forEach(row=>{
+    const subId = row.dataset.subid;
+    const thObt = parseFloat(document.getElementById('mk-th-'+subId).value)||0;
+    const prObt = parseFloat(document.getElementById('mk-pr-'+subId).value)||0;
+    const thMax = parseFloat(row.dataset.theoryMax)||0;
+    const prMax = parseFloat(row.dataset.practicalMax)||0;
+    if(document.getElementById('mk-th-'+subId).value==='' && document.getElementById('mk-pr-'+subId).value==='') allGraded=false;
+    sumTotal += thObt+prObt;
+    sumMax += thMax+prMax;
+  });
+  if(!allGraded) return;
+  const pct = sumMax>0 ? Math.round(sumTotal/sumMax*100) : 0;
+  let grade='F';
+  if(pct>=90) grade='O'; else if(pct>=80) grade='A+'; else if(pct>=70) grade='A';
+  else if(pct>=60) grade='B+'; else if(pct>=50) grade='B'; else if(pct>=40) grade='C';
+  document.getElementById('mk-sum-total').textContent = sumTotal;
+  document.getElementById('mk-sum-max').textContent   = sumMax;
+  document.getElementById('mk-sum-pct').textContent   = pct+'%';
+  document.getElementById('mk-sum-grade').textContent = grade;
+  document.getElementById('marks-summary').style.display='flex';
+}
+
+function mkAutoGradeAll() {
+  document.querySelectorAll('[data-subid]').forEach(row=>{
+    mkCalcRow(row.dataset.subid);
   });
 }
 
-function submitMarks() {
-  const batch = document.getElementById('mk-batch').value;
-  const course = document.getElementById('mk-course').value;
-  const subject = document.getElementById('mk-subject').value.trim();
+function mkSubmitMarks() {
+  const rollNo  = document.getElementById('mk-student').value;
+  const course  = document.getElementById('mk-course').value;
+  const examName = document.getElementById('mk-exam').value.trim();
+  if (!rollNo || !course) { showAlert('marks-alert','error','❌ Select a student.'); return; }
+  if (!examName)          { showAlert('marks-alert','error','❌ Enter the Exam / Test name.'); return; }
+  const rows = document.querySelectorAll('[data-subid]');
+  if (!rows.length) { showAlert('marks-alert','error','❌ No subjects loaded.'); return; }
+  const student = students.find(s=>s.rollNo===rollNo);
+  const studentName = student ? student.fname+' '+student.lname : rollNo;
+  const batch = student ? student.batch : '';
+  const newMarks = [];
+  rows.forEach(row=>{
+    const subId   = row.dataset.subid;
+    const subName = row.dataset.subname;
+    const thMax   = parseFloat(row.dataset.theoryMax)||100;
+    const thPass  = parseFloat(row.dataset.theoryPass)||35;
+    const prMax   = parseFloat(row.dataset.practicalMax)||50;
+    const prPass  = parseFloat(row.dataset.practicalPass)||18;
+    const thObt   = parseFloat(document.getElementById('mk-th-'+subId).value)||0;
+    const prObt   = parseFloat(document.getElementById('mk-pr-'+subId).value)||0;
+    const total   = thObt+prObt;
+    const maxTotal = thMax+prMax;
+    const pct     = maxTotal>0?(total/maxTotal)*100:0;
+    const thFail  = thObt<thPass, prFail=prObt<prPass;
+    let grade='F';
+    if(!thFail&&!prFail){
+      if(pct>=90) grade='O'; else if(pct>=80) grade='A+'; else if(pct>=70) grade='A';
+      else if(pct>=60) grade='B+'; else if(pct>=50) grade='B'; else if(pct>=40) grade='C';
+    }
+    newMarks.push({
+      id: Date.now()+Math.random(), rollNo, studentName, course, batch,
+      examName, subject: subName, subjectId: subId,
+      theoryMax: thMax, theoryPass: thPass, theoryObt: thObt,
+      practicalMax: prMax, practicalPass: prPass, practicalObt: prObt,
+      total, maxTotal, grade,
+      enteredBy: currentUser.name, enteredAt: new Date().toISOString()
+    });
+  });
+  marks = [...marks, ...newMarks];
+  DB.set('marks', marks);
+  showAlert('marks-alert','success',`✅ Marks saved for ${studentName} — Exam: ${examName} (${newMarks.length} subjects)`);
+  // Reset form
+  document.getElementById('mk-student').value='';
+  document.getElementById('mk-exam').value='';
+  document.getElementById('marks-subjects-card').style.display='none';
+  document.getElementById('marks-summary').style.display='none';
+}
+
+// kept for backward compat
+function submitMarks() { mkSubmitMarks(); }
+
+function _OLD_submitMarks_rows() {
+  // old per-student rows code kept for reference only — not called
+  const batch = ''; const course = ''; const subject = '';
   if (!subject) { showAlert('marks-alert','error','❌ Enter the subject / exam name.'); return; }
   const rows = document.querySelectorAll('#marks-rows [data-roll]');
   if (!rows.length) return;
