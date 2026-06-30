@@ -378,11 +378,8 @@ tr:hover td { background: #f8fafd; }
         <input id="login-password" type="password" placeholder="Enter your password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
       </div>
       <button class="btn-login" onclick="doLogin()">Sign In</button>
-      <div class="login-hint">
-        Default credentials:<br>
-        <strong>Admin:</strong> admin / admin123 &nbsp;|&nbsp;
-        <strong>Office:</strong> office / office123<br>
-        Teacher accounts are created by the Admin in User Management.
+      <div class="login-hint" id="login-hint-text">
+        Loading credentials…
       </div>
     </div>
   </div>
@@ -1217,10 +1214,9 @@ tr:hover td { background: #f8fafd; }
       <!-- Firebase sync controls -->
       <div class="card">
         <div class="card-header"><div class="card-title"><span class="icon">☁️</span> Firebase Data Sync</div></div>
-        <p class="section-desc" style="margin-bottom:16px;">All data is automatically mirrored to Firebase on every save. Use these buttons to manually pull existing data from Firebase into this browser, or push all local data up.</p>
+        <p class="section-desc" style="margin-bottom:16px;">All data is stored <strong>directly in Firebase Firestore</strong> — no localStorage. Every save by any staff member is instantly visible to all others in real time. Listeners start automatically on login.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
-          <button class="btn btn-teal" onclick="loadAllFromFirebase()">⬇️ Pull All Data from Firebase</button>
-          <button class="btn btn-primary" onclick="pushAllToFirebase()">⬆️ Push All Local Data to Firebase</button>
+          <button class="btn btn-primary" onclick="pushAllToFirebase()">⬆️ Re-push All Data to Firebase</button>
         </div>
         <div id="pull-status"></div>
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
@@ -1260,7 +1256,7 @@ tr:hover td { background: #f8fafd; }
         </div>
         <div id="excel-status" style="margin-top:12px;"></div>
         <div class="alert alert-info" style="margin-top:16px;">
-          💡 <strong>Tip:</strong> Export to Excel regularly as a backup. Data is stored in Firebase (cloud) and your browser (local cache). Use "Pull All Data from Firebase" to restore data in any browser.
+          💡 <strong>Tip:</strong> Data is stored live in Firebase Firestore — no localStorage. All staff see the same data in real time. Export to Excel regularly as an offline backup.
         </div>
       </div>
 
@@ -1375,37 +1371,342 @@ tr:hover td { background: #f8fafd; }
 
 <script>
 // ============================================================
+// FIREBASE — FIRESTORE AS PRIMARY STORE (real-time)
+// ============================================================
+let firebaseApp = null;
+let firestoreDB = null;
+let firebaseInitialized = false;
+let _fsLib = null; // holds all firestore functions after import
+
+// Hardcoded Firebase config — all staff connect automatically, no manual setup needed.
+// Admin can still override via Settings page if the project ever changes.
+const HARDCODED_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCHtMPsafgqRUtxutMXAk3p7cv3a5gmndc",
+  authDomain: "exploremanagment.firebaseapp.com",
+  projectId: "exploremanagment",
+  storageBucket: "exploremanagment.firebasestorage.app",
+  messagingSenderId: "861154539484",
+  appId: "1:861154539484:web:2f754b49f8cca6bd458119"
+};
+
+function getFirebaseConfig() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('explore_firebase_config') || 'null');
+    if (stored && stored.projectId) return stored;
+  } catch(e) {}
+  return HARDCODED_FIREBASE_CONFIG;
+}
+function saveFirebaseConfig(cfg) { localStorage.setItem('explore_firebase_config', JSON.stringify(cfg)); }
+
+// Loads a module via dynamic import with one retry, then falls back to a classic
+// <script> tag (compat build) if import() itself is being blocked by an
+// extension/firewall — this is the most common cause of "Failed to fetch
+// dynamically imported module" even when the internet connection is fine.
+function loadScriptTag(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector('script[src="'+src+'"]')) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load script: ' + src));
+    document.head.appendChild(s);
+  });
+}
+
+async function importWithRetry(url, attempts = 2) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try { return await import(url); }
+    catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 600)); }
+  }
+  throw lastErr;
+}
+
+async function initFirebase() {
+  const config = getFirebaseConfig();
+  if (!config || !config.projectId) return false;
+  try {
+    if (firebaseApp && firebaseApp.options && firebaseApp.options.projectId === config.projectId) return true;
+    if (firebaseApp) { try { await firebaseApp.delete(); } catch(e){} firebaseApp=null; firestoreDB=null; }
+
+    try {
+      // Primary path: ES module dynamic import
+      const { initializeApp } = await importWithRetry('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
+      const fsLib = await importWithRetry('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+      firebaseApp = initializeApp(config, 'explore-' + config.projectId);
+      firestoreDB = fsLib.getFirestore(firebaseApp);
+      _fsLib = fsLib;
+    } catch (importErr) {
+      console.warn('ES module import failed, falling back to compat script tags:', importErr.message);
+      // Fallback path: classic <script> tags (global `firebase` namespace, compat build)
+      await loadScriptTag('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
+      await loadScriptTag('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js');
+      firebaseApp = window.firebase.initializeApp(config, 'explore-' + config.projectId);
+      firestoreDB = firebaseApp.firestore();
+      // Wrap the compat (namespaced) API to match the modular API surface used elsewhere in this app
+      _fsLib = {
+        collection: (db, name) => db.collection(name),
+        doc: (db, name, id) => db.collection(name).doc(id),
+        getDocs: (colRef) => colRef.get(),
+        setDoc: (docRef, data) => docRef.set(data),
+        deleteDoc: (docRef) => docRef.delete(),
+        onSnapshot: (colRef, onNext, onError) => colRef.onSnapshot(
+          snap => onNext({ docs: snap.docs }),
+          onError
+        )
+      };
+    }
+
+    firebaseInitialized = true;
+    console.log('Firebase ready:', config.projectId);
+    return true;
+  } catch(e) {
+    console.error('Firebase init failed:', e);
+    firebaseInitialized = false;
+    return false;
+  }
+}
+
+// ---- Low-level Firestore helpers ----
+async function fbSetDoc(col, docId, data) {
+  if (!firebaseInitialized) return false;
+  try { await _fsLib.setDoc(_fsLib.doc(firestoreDB, col, String(docId)), data); return true; }
+  catch(e) { console.error('fbSetDoc', col, e); return false; }
+}
+async function fbDeleteDoc(col, docId) {
+  if (!firebaseInitialized) return false;
+  try { await _fsLib.deleteDoc(_fsLib.doc(firestoreDB, col, String(docId))); return true; }
+  catch(e) { console.error('fbDeleteDoc', col, e); return false; }
+}
+async function fbGetAll(col) {
+  if (!firebaseInitialized) return [];
+  try {
+    const snap = await _fsLib.getDocs(_fsLib.collection(firestoreDB, col));
+    return snap.docs.map(d => d.data());
+  } catch(e) { console.error('fbGetAll', col, e); return []; }
+}
+
+// ---- Real-time listeners ---- 
+// Each listener keeps the in-memory array fresh and re-renders the UI.
+const _unsubs = {};
+function listenCol(col, onData) {
+  if (!firebaseInitialized) return;
+  if (_unsubs[col]) { _unsubs[col](); delete _unsubs[col]; }
+  _unsubs[col] = _fsLib.onSnapshot(
+    _fsLib.collection(firestoreDB, col),
+    snap => { onData(snap.docs.map(d => d.data())); },
+    err => console.warn('Listener error', col, err)
+  );
+}
+function stopAllListeners() { Object.values(_unsubs).forEach(u=>u()); Object.keys(_unsubs).forEach(k=>delete _unsubs[k]); }
+
+// ---- In-memory data arrays (kept fresh by listeners) ----
+let students = [];
+let payments = [];
+let attendance = [];
+let marks = [];
+let salaries = [];
+let incomes = [];
+let expenses = [];
+let certificates = [];
+let masterData = {
+  courses: [
+    {id:'c1',name:'Tally with GST',duration:3,fee:3500},
+    {id:'c2',name:'MS Office',duration:2,fee:2500},
+    {id:'c3',name:'DTP (Desktop Publishing)',duration:3,fee:3000},
+    {id:'c4',name:'Programming in Python',duration:6,fee:5000},
+    {id:'c5',name:'Web Design',duration:6,fee:5500},
+    {id:'c6',name:'Hardware & Networking',duration:6,fee:6000},
+    {id:'c7',name:'Digital Marketing',duration:3,fee:4000},
+    {id:'c8',name:'AutoCAD',duration:3,fee:4500}
+  ],
+  batches: [
+    {id:'b1',name:'Morning',time:'8:00 AM - 10:00 AM'},
+    {id:'b2',name:'Forenoon',time:'10:00 AM - 12:00 PM'},
+    {id:'b3',name:'Afternoon',time:'1:00 PM - 3:00 PM'},
+    {id:'b4',name:'Evening',time:'5:00 PM - 7:00 PM'}
+  ],
+  staff: []
+};
+
+// ---- DB object — ALL writes go directly to Firestore ----
+// No localStorage for data. Each collection item needs a stable docId.
+const DB = {
+  // Write a whole array to Firestore (for collections managed as arrays like courses/batches/staff/salaries)
+  saveArray: async (col, arr) => {
+    if (!firebaseInitialized) { showAlert('global-alert','error','❌ Firebase not connected. Please configure Firebase in Settings.'); return; }
+    // Delete all docs in collection first, then write fresh
+    try {
+      const snap = await _fsLib.getDocs(_fsLib.collection(firestoreDB, col));
+      const dels = snap.docs.map(d => _fsLib.deleteDoc(_fsLib.doc(firestoreDB, col, d.id)));
+      await Promise.all(dels);
+      for (let i = 0; i < arr.length; i++) {
+        const item = arr[i];
+        const id = item.id || item.rollNo || item.receiptNo || String(item.id || Date.now()+'_'+i);
+        await _fsLib.setDoc(_fsLib.doc(firestoreDB, col, String(id)), item);
+      }
+    } catch(e) { console.error('DB.saveArray', col, e); }
+  },
+  // Write a single doc (for adding/updating one item)
+  setDoc: async (col, id, data) => fbSetDoc(col, id, data),
+  // Delete a single doc
+  deleteDoc: async (col, id) => fbDeleteDoc(col, id),
+  // Config stored in localStorage only (not a collection)
+  cfg: () => { try { return JSON.parse(localStorage.getItem('explore_config') || '{}'); } catch(e) { return {}; } },
+  saveCfg: v => localStorage.setItem('explore_config', JSON.stringify(v))
+};
+
+// Legacy shim — old code calls DB.set(key, array). Map to DB.saveArray.
+DB.set = async (k, v) => {
+  const colMap = {
+    students:'students', payments:'payments', attendance:'attendance',
+    marks:'marks', salaries:'salaries', incomes:'incomes',
+    expenses:'expenses', certificates:'certificates',
+    master_courses:'master_courses', master_batches:'master_batches', master_staff:'master_staff'
+  };
+  if (colMap[k]) await DB.saveArray(colMap[k], v);
+};
+
+// ---- Start all real-time listeners after login ----
+function startListeners() {
+  listenCol('students', data => {
+    students = data;
+    if (document.getElementById('page-students').classList.contains('active')) renderStudentsTable();
+    refreshDashboard();
+  });
+  listenCol('payments', data => {
+    payments = data;
+    refreshDashboard();
+    if (document.getElementById('page-fees').classList.contains('active')) { /* fees page re-renders on interaction */ }
+  });
+  listenCol('attendance', data => {
+    attendance = data;
+    if (document.getElementById('page-attendance-report').classList.contains('active')) renderAttendanceReport();
+    refreshDashboard();
+  });
+  listenCol('marks', data => {
+    marks = data;
+  });
+  listenCol('salaries', data => { salaries = data; });
+  listenCol('incomes', data => {
+    incomes = data;
+    if (document.getElementById('page-finance').classList.contains('active')) renderFinance();
+  });
+  listenCol('expenses', data => {
+    expenses = data;
+    if (document.getElementById('page-finance').classList.contains('active')) renderFinance();
+  });
+  listenCol('certificates', data => {
+    certificates = data;
+    if (document.getElementById('page-certificates').classList.contains('active')) renderCertificates();
+  });
+  listenCol('master_courses', data => {
+    if (data.length) { masterData.courses = data; populateCourseBatchSelects(); }
+  });
+  listenCol('master_batches', data => {
+    if (data.length) { masterData.batches = data; populateCourseBatchSelects(); }
+  });
+  listenCol('master_staff', data => {
+    masterData.staff = data;
+  });
+  // Users collection (login + user management)
+  listenCol('users', data => {
+    if (data.length) {
+      _cachedUsers = data;
+      updateLoginHint();
+      if (document.getElementById('page-users') && document.getElementById('page-users').classList.contains('active')) renderUsersPage();
+    }
+  });
+}
+
+// ============================================================
 // AUTH & ROLE SYSTEM
 // ============================================================
 const DEFAULT_USERS = [
-  { name:'Administrator', username:'admin', password:'admin123', role:'admin', dept:'Management', mobile:'' },
-  { name:'Office Staff', username:'office', password:'office123', role:'office', dept:'Front Office', mobile:'' }
+  { name:'Administrator', username:'admin', password:'admin123', role:'admin', dept:'Management', mobile:'', courses:[], id:'admin' },
+  { name:'Office Staff',  username:'office', password:'office123', role:'office', dept:'Front Office', mobile:'', courses:[], id:'office' }
 ];
-// Teacher accounts are created individually by Admin in User Management.
-// Each teacher logs in with their own username/password.
 
-function getUsers() {
-  const stored = localStorage.getItem('explore_users');
-  return stored ? JSON.parse(stored) : DEFAULT_USERS;
+let _cachedUsers = null; // loaded from Firestore users collection
+
+async function getUsers() {
+  if (_cachedUsers && _cachedUsers.length) return _cachedUsers;
+  if (firebaseInitialized) {
+    const data = await fbGetAll('users');
+    if (data.length) { _cachedUsers = data; return data; }
+    // First run — bootstrap defaults into Firestore
+    for (const u of DEFAULT_USERS) await fbSetDoc('users', u.id, u);
+    _cachedUsers = [...DEFAULT_USERS];
+    return _cachedUsers;
+  }
+  // Firebase not yet configured — fall back to defaults for login screen
+  return DEFAULT_USERS;
 }
-function saveUsers(u) { localStorage.setItem('explore_users', JSON.stringify(u)); }
+
+async function saveUsers(arr) {
+  _cachedUsers = arr;
+  if (!firebaseInitialized) { showAlert('global-alert','error','❌ Firebase not connected. User changes not saved to cloud.'); return; }
+  for (const u of arr) {
+    const id = u.id || u.username;
+    u.id = id;
+    await fbSetDoc('users', id, u);
+  }
+  updateLoginHint();
+}
+
+function updateLoginHint() {
+  const hint = document.getElementById('login-hint-text');
+  if (!hint) return;
+  const users = _cachedUsers || DEFAULT_USERS;
+  const adminUser  = users.find(u => u.role === 'admin');
+  const officeUser = users.find(u => u.role === 'office');
+  let lines = [];
+  if (adminUser)  lines.push('<strong>Admin:</strong> ' + adminUser.username  + ' / ' + adminUser.password);
+  if (officeUser) lines.push('<strong>Office:</strong> ' + officeUser.username + ' / ' + officeUser.password);
+  const teacherCount = users.filter(u => u.role === 'teacher').length;
+  hint.innerHTML = (lines.length ? lines.join(' &nbsp;|&nbsp; ') + '<br>' : '')
+    + '<span style="opacity:0.6;">Teacher accounts created by Admin in User Management.' + (teacherCount ? ' (' + teacherCount + ' active)' : '') + '</span>';
+}
 
 let currentUser = null;
 
-function doLogin() {
+async function doLogin() {
   const uname = document.getElementById('login-username').value.trim();
-  const pass = document.getElementById('login-password').value;
-  const users = getUsers();
-  // Auto-detect role — no role selector needed
-  const user = users.find(u => u.username === uname && u.password === pass);
+  const pass  = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+
+  // Show connecting indicator if Firebase not yet ready
+  if (!firebaseInitialized) {
+    errEl.textContent = '⏳ Connecting to database…';
+    errEl.style.display = 'block';
+    let initError = null;
+    const ok = await initFirebase().catch(e => { initError = e; return false; });
+    if (!ok) {
+      errEl.textContent = '❌ Could not connect to Firebase. ' + (initError ? ('Error: ' + initError.message) : 'Check that Firestore is enabled and security rules allow access.');
+      errEl.style.display = 'block';
+      console.error('Firebase init failed. Config used:', getFirebaseConfig());
+      return;
+    }
+    errEl.style.display = 'none';
+  }
+
+  const users = await getUsers();
+  const user  = users.find(u => u.username === uname && u.password === pass);
   if (!user) {
-    document.getElementById('login-error').style.display = 'block';
+    errEl.textContent = 'Invalid username or password.';
+    errEl.style.display = 'block';
     return;
   }
+
   currentUser = user;
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-shell').classList.add('visible');
   applyRoleUI();
+
+  // Start real-time listeners — data flows in automatically
+  startListeners();
+
   populateCourseBatchSelects();
   refreshDashboard();
   document.getElementById('att-date').value = todayStr();
@@ -1416,13 +1717,16 @@ function doLogin() {
   document.getElementById('inc-date').value = todayStr();
   document.getElementById('exp-date').value = todayStr();
   document.getElementById('cert-givendate').value = todayStr();
-  // Close mobile sidebar on login
   document.querySelector('.sidebar').classList.remove('open');
   document.getElementById('sidebar-overlay').classList.remove('open');
 }
 
 function doLogout() {
+  stopAllListeners();
+  _cachedUsers = null;
   currentUser = null;
+  // Reset in-memory data
+  students=[]; payments=[]; attendance=[]; marks=[]; salaries=[]; incomes=[]; expenses=[]; certificates=[];
   document.getElementById('app-shell').classList.remove('visible');
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('login-username').value = '';
@@ -1543,133 +1847,23 @@ function showPage(page) {
 function todayStr() { return new Date().toISOString().slice(0,10); }
 document.getElementById('current-date').textContent = new Date().toLocaleDateString('en-IN', {weekday:'short', year:'numeric', month:'short', day:'numeric'});
 
-// ============================================================
-// FIREBASE INTEGRATION
-// ============================================================
-let firebaseApp = null;
-let firestoreDB = null;
-let firebaseInitialized = false;
-
-function getFirebaseConfig() {
-  try { return JSON.parse(localStorage.getItem('explore_firebase_config') || 'null'); } catch(e) { return null; }
-}
-function saveFirebaseConfig(config) {
-  localStorage.setItem('explore_firebase_config', JSON.stringify(config));
-}
-
-async function initFirebase() {
-  const config = getFirebaseConfig();
-  if (!config || !config.projectId) return false;
-  try {
-    if (firebaseApp) {
-      // Already initialised with same project
-      if (firebaseApp.options.projectId === config.projectId) return true;
-      // Different project — delete old app
-      await firebaseApp.delete();
-      firebaseApp = null; firestoreDB = null;
-    }
-    const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
-    const { getFirestore, collection, getDocs, setDoc, doc, deleteDoc } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
-    firebaseApp = initializeApp(config, 'explore-' + Date.now());
-    firestoreDB = getFirestore(firebaseApp);
-    window._fs = { getFirestore, collection, getDocs, setDoc, doc, deleteDoc, firestoreDB };
-    firebaseInitialized = true;
-    console.log('Firebase initialised for project:', config.projectId);
-    return true;
-  } catch(e) {
-    console.error('Firebase init failed:', e);
-    firebaseInitialized = false;
-    return false;
+// Auto-init Firebase on page load (config saved from previous session)
+(async () => {
+  const ok = await initFirebase();
+  const statusEl = document.getElementById('fb-connection-status');
+  if (ok) {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--green);">\u2705 Connected</span>';
+    await getUsers();
+    updateLoginHint();
+  } else {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted);">Not connected \u2014 configure below</span>';
+    updateLoginHint();
   }
-}
-
-// ---- Firestore helpers ----
-async function fbGetCollection(name) {
-  if (!firebaseInitialized || !firestoreDB) return null;
-  try {
-    const { collection, getDocs } = window._fs;
-    const snap = await getDocs(collection(firestoreDB, name));
-    return snap.docs.map(d => d.data());
-  } catch(e) { console.error('fbGet error', name, e); return null; }
-}
-
-async function fbSaveCollection(name, arr) {
-  if (!firebaseInitialized || !firestoreDB) return false;
-  try {
-    const { collection, getDocs, setDoc, doc, deleteDoc } = window._fs;
-    // Delete existing docs
-    const snap = await getDocs(collection(firestoreDB, name));
-    for (const d of snap.docs) await deleteDoc(doc(firestoreDB, name, d.id));
-    // Write new docs
-    for (let i = 0; i < arr.length; i++) {
-      const item = arr[i];
-      const id = item.id || item.rollNo || item.receiptNo || item.salaryId || ('item_' + i);
-      await setDoc(doc(firestoreDB, name, String(id)), item);
-    }
-    return true;
-  } catch(e) { console.error('fbSave error', name, e); return false; }
-}
-
-async function fbSaveDoc(colName, docId, data) {
-  if (!firebaseInitialized || !firestoreDB) return false;
-  try {
-    const { setDoc, doc } = window._fs;
-    await setDoc(doc(firestoreDB, colName, docId), data);
-    return true;
-  } catch(e) { console.error('fbSaveDoc error', e); return false; }
-}
-
-// ============================================================
-// DATA STORE — localStorage (cache) + Firebase (cloud)
-// ============================================================
-const DB = {
-  get: k => { try { return JSON.parse(localStorage.getItem('explore_' + k) || '[]'); } catch(e) { return []; } },
-  set: async (k, v) => {
-    localStorage.setItem('explore_' + k, JSON.stringify(v));
-    // Mirror to Firestore
-    const colMap = {
-      students:'students', payments:'payments', attendance:'attendance',
-      marks:'marks', salaries:'salaries', incomes:'incomes',
-      expenses:'expenses', certificates:'certificates',
-      master_courses:'master_courses', master_batches:'master_batches', master_staff:'master_staff'
-    };
-    if (firebaseInitialized && colMap[k]) {
-      fbSaveCollection(colMap[k], v).catch(e => console.warn('Firebase sync skipped:', e.message));
-    }
-  },
-  cfg: () => { try { return JSON.parse(localStorage.getItem('explore_config') || '{}'); } catch(e) { return {}; } },
-  saveCfg: v => localStorage.setItem('explore_config', JSON.stringify(v))
-};
+})();
 
 async function loadAllFromFirebase() {
-  if (!firebaseInitialized) return;
-  showGlobalLoader('☁️ Loading data from Firebase...');
-  const keys = ['students','payments','attendance','marks','salaries','incomes','expenses','certificates','master_courses','master_batches','master_staff'];
-  for (const k of keys) {
-    const data = await fbGetCollection(k);
-    if (data && data.length > 0) {
-      localStorage.setItem('explore_' + k, JSON.stringify(data));
-    }
-  }
-  // Reload in-memory vars
-  students = DB.get('students');
-  payments = DB.get('payments');
-  attendance = DB.get('attendance');
-  marks = DB.get('marks');
-  salaries = DB.get('salaries');
-  incomes = DB.get('incomes');
-  expenses = DB.get('expenses');
-  certificates = DB.get('certificates');
-  const mc = DB.get('master_courses');
-  const mb = DB.get('master_batches');
-  const ms = DB.get('master_staff');
-  if (mc.length) masterData.courses = mc;
-  if (mb.length) masterData.batches = mb;
-  if (ms.length) masterData.staff = ms;
-  hideGlobalLoader();
-  refreshDashboard();
-  renderStudentsTable();
-  showAlert('global-alert','success','✅ Data loaded from Firebase successfully!');
+  if (!firebaseInitialized) { showAlert('global-alert','error','\u274c Firebase not connected.'); return; }
+  showAlert('global-alert','info','\u2139️ Real-time listeners are active \u2014 data syncs automatically. No manual pull needed.');
 }
 
 function showGlobalLoader(msg) {
@@ -1684,58 +1878,12 @@ function showGlobalLoader(msg) {
   document.getElementById('global-loader-msg').textContent = msg;
   el.style.display = 'flex';
 }
-function hideGlobalLoader() {
-  const el = document.getElementById('global-loader');
-  if (el) el.style.display = 'none';
-}
+function hideGlobalLoader() { const el = document.getElementById('global-loader'); if (el) el.style.display = 'none'; }
 
-let students = DB.get('students');
-let payments = DB.get('payments');
-let attendance = DB.get('attendance');
-let marks = DB.get('marks');
-let salaries = DB.get('salaries');
-let incomes = DB.get('incomes');
-let expenses = DB.get('expenses');
-let certificates = DB.get('certificates');
-let masterData = {
-  courses: DB.get('master_courses').length ? DB.get('master_courses') : [
-    {id:'c1',name:'Tally with GST',duration:3,fee:3500},
-    {id:'c2',name:'MS Office',duration:2,fee:2500},
-    {id:'c3',name:'DTP (Desktop Publishing)',duration:3,fee:3000},
-    {id:'c4',name:'Programming in Python',duration:6,fee:5000},
-    {id:'c5',name:'Web Design',duration:6,fee:5500},
-    {id:'c6',name:'Hardware & Networking',duration:6,fee:6000},
-    {id:'c7',name:'Digital Marketing',duration:3,fee:4000},
-    {id:'c8',name:'AutoCAD',duration:3,fee:4500}
-  ],
-  batches: DB.get('master_batches').length ? DB.get('master_batches') : [
-    {id:'b1',name:'Morning',time:'8:00 AM - 10:00 AM'},
-    {id:'b2',name:'Forenoon',time:'10:00 AM - 12:00 PM'},
-    {id:'b3',name:'Afternoon',time:'1:00 PM - 3:00 PM'},
-    {id:'b4',name:'Evening',time:'5:00 PM - 7:00 PM'}
-  ],
-  staff: DB.get('master_staff').length ? DB.get('master_staff') : []
-};
-let cfg = DB.cfg();
-
-// Auto-init Firebase on page load if config already saved
-(async () => {
-  const ok = await initFirebase();
-  if (ok) {
-    const fbStatus = document.getElementById('fb-connection-status');
-    if (fbStatus) fbStatus.innerHTML = '<span style="color:var(--green);">✅ Connected</span>';
-  }
-})();
-
-// ============================================================
-// GOOGLE SHEETS — REMOVED (replaced by Firebase)
-// Keeping stub so any lingering references don't crash
-// ============================================================
 async function callSheets(data) { return { local: true }; }
-function showPullStatus(type, msg) {
-  const el = document.getElementById('pull-status');
-  if (el) el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
-}
+function showPullStatus(type, msg) { const el = document.getElementById('pull-status'); if (el) el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`; }
+
+let cfg = DB.cfg();
 
 // ============================================================
 // SETTINGS
@@ -1747,8 +1895,6 @@ function saveSettings() {
     instContact: document.getElementById('gs-inst-contact').value.trim()
   };
   DB.saveCfg(cfg);
-
-  // Save Firebase config
   const fbConfig = {
     apiKey: document.getElementById('fb-api-key').value.trim(),
     authDomain: document.getElementById('fb-auth-domain').value.trim(),
@@ -1759,9 +1905,9 @@ function saveSettings() {
   };
   if (fbConfig.projectId) {
     saveFirebaseConfig(fbConfig);
-    showAlert('global-alert','success','✅ Settings saved! Click "Connect Firebase" to activate.');
+    showAlert('global-alert','success','✅ Config saved! Click "Connect Firebase" to activate.');
   } else {
-    showAlert('global-alert','success','✅ Settings saved (Firebase not configured).');
+    showAlert('global-alert','success','✅ Settings saved.');
   }
 }
 
@@ -1780,28 +1926,30 @@ async function connectFirebase() {
   }
   saveFirebaseConfig(fbConfig);
   const statusEl = document.getElementById('fb-connection-status');
-  if (statusEl) statusEl.innerHTML = '⏳ Connecting...';
   const btn = document.getElementById('fb-connect-btn');
+  if (statusEl) statusEl.innerHTML = '⏳ Connecting...';
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Connecting...'; }
   const ok = await initFirebase();
   if (btn) { btn.disabled = false; btn.textContent = '🔌 Connect Firebase'; }
   if (ok) {
-    if (statusEl) statusEl.innerHTML = '<span style="color:var(--green);">✅ Connected to Firebase!</span>';
-    showAlert('global-alert','success','✅ Firebase connected! You can now sync data.');
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--green);">✅ Connected!</span>';
+    showAlert('global-alert','success','✅ Firebase connected! Logging in will now start real-time sync for all staff.');
+    // Bootstrap users if first time
+    await getUsers();
+    updateLoginHint();
   } else {
-    if (statusEl) statusEl.innerHTML = '<span style="color:var(--red);">❌ Connection failed. Check your config.</span>';
-    showAlert('global-alert','error','❌ Firebase connection failed. Check config and ensure Firestore is enabled in your project.');
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--red);">❌ Connection failed</span>';
+    showAlert('global-alert','error','❌ Firebase connection failed. Check config and ensure Firestore is enabled.');
   }
 }
 
 function syncUsersToSheets() {
-  showAlert('global-alert','info','ℹ️ Google Sheets sync removed. User data is stored in Firebase automatically when you add/edit users.');
+  showAlert('global-alert','info','ℹ️ Users are stored directly in Firebase. Manage them in User Management.');
 }
 
 function loadSettings() {
   if (cfg.instName) document.getElementById('gs-inst-name').value = cfg.instName;
   if (cfg.instContact) document.getElementById('gs-inst-contact').value = cfg.instContact;
-  // Load Firebase config
   const fbConfig = getFirebaseConfig();
   if (fbConfig) {
     if (fbConfig.apiKey) document.getElementById('fb-api-key').value = fbConfig.apiKey;
@@ -1812,11 +1960,9 @@ function loadSettings() {
     if (fbConfig.appId) document.getElementById('fb-app-id').value = fbConfig.appId;
   }
   const statusEl = document.getElementById('fb-connection-status');
-  if (statusEl) {
-    statusEl.innerHTML = firebaseInitialized
-      ? '<span style="color:var(--green);">✅ Connected</span>'
-      : '<span style="color:var(--muted);">Not connected</span>';
-  }
+  if (statusEl) statusEl.innerHTML = firebaseInitialized
+    ? '<span style="color:var(--green);">✅ Connected — real-time sync active</span>'
+    : '<span style="color:var(--muted);">Not connected</span>';
   if (!canModify()) {
     ['gs-inst-name','gs-inst-contact','fb-api-key','fb-auth-domain','fb-project-id','fb-storage-bucket','fb-messaging-sender-id','fb-app-id'].forEach(id => { const el=document.getElementById(id); if(el) el.disabled=true; });
     document.getElementById('settings-actions').style.display = 'none';
@@ -1827,25 +1973,19 @@ function loadSettings() {
 }
 
 async function testConnection() {
-  if (!firebaseInitialized) {
-    showAlert('global-alert','warn','⚠️ Firebase not connected yet. Click "Connect Firebase" first.');
-    return;
-  }
+  if (!firebaseInitialized) { showAlert('global-alert','warn','⚠️ Firebase not connected yet. Click "Connect Firebase" first.'); return; }
   showAlert('global-alert','info','🔌 Testing Firebase connection...');
   try {
-    const { collection, getDocs } = window._fs;
-    await getDocs(collection(firestoreDB, '_ping_test'));
-    showAlert('global-alert','success','✅ Firebase connection is working!');
-  } catch(e) {
-    showAlert('global-alert','error','❌ Firebase test failed: ' + e.message);
-  }
+    await _fsLib.getDocs(_fsLib.collection(firestoreDB, '_ping_test'));
+    showAlert('global-alert','success','✅ Firebase connection is working! Real-time sync is active.');
+  } catch(e) { showAlert('global-alert','error','❌ Firebase test failed: ' + e.message); }
 }
 
 // ============================================================
 // USER MANAGEMENT (Admin only)
 // ============================================================
-function renderUsersPage() {
-  const users = getUsers();
+async function renderUsersPage() {
+  const users = await getUsers();
   const container = document.getElementById('users-list');
   const roleOrder = ['admin','office','teacher'];
   const sorted = [...users].sort((a,b)=>roleOrder.indexOf(a.role)-roleOrder.indexOf(b.role));
@@ -1886,13 +2026,15 @@ function openAddUserModal() {
   document.getElementById('uf-mobile').value = '';
   document.getElementById('uf-edit-index').value = '';
   document.getElementById('user-form-alert').innerHTML = '';
+  document.getElementById('uf-username').disabled = false;
+  document.getElementById('uf-username').title = '';
   document.querySelectorAll('#uf-courses-check input').forEach(cb => cb.checked = false);
   document.getElementById('uf-courses-wrap').style.display = 'none';
   document.getElementById('user-modal').classList.add('open');
 }
 
-function openEditUserModal(i) {
-  const users = getUsers();
+async function openEditUserModal(i) {
+  const users = await getUsers();
   const u = users[i];
   document.getElementById('user-modal-title').textContent = 'Edit User — ' + u.name;
   document.getElementById('uf-name').value = u.name;
@@ -1903,6 +2045,15 @@ function openEditUserModal(i) {
   document.getElementById('uf-mobile').value = u.mobile || '';
   document.getElementById('uf-edit-index').value = i;
   document.getElementById('user-form-alert').innerHTML = '';
+  // Primary admin username is fixed; all others can be changed
+  const unameField = document.getElementById('uf-username');
+  if (u.username === 'admin') {
+    unameField.disabled = true;
+    unameField.title = 'Primary admin username cannot be changed';
+  } else {
+    unameField.disabled = false;
+    unameField.title = '';
+  }
   // Load assigned courses for teacher
   document.querySelectorAll('#uf-courses-check input').forEach(cb => {
     cb.checked = (u.courses||[]).includes(cb.value);
@@ -1916,7 +2067,7 @@ function toggleTeacherFields() {
   document.getElementById('uf-courses-wrap').style.display = role === 'teacher' ? '' : 'none';
 }
 
-function saveUser() {
+async function saveUser() {
   const name = document.getElementById('uf-name').value.trim();
   const username = document.getElementById('uf-username').value.trim().toLowerCase().replace(/\s+/g,'_');
   const password = document.getElementById('uf-password').value.trim();
@@ -1930,37 +2081,52 @@ function saveUser() {
     return;
   }
 
-  // Collect assigned courses for teachers
   const courses = role === 'teacher'
     ? [...document.querySelectorAll('#uf-courses-check input:checked')].map(cb => cb.value)
     : [];
 
-  const users = getUsers();
-  const userData = { name, username, password, role, dept, mobile, courses };
+  const users = await getUsers();
+  const userData = { name, username, password, role, dept, mobile, courses, id: username };
 
   if (editIdx !== '') {
-    userData.username = users[parseInt(editIdx)].username; // preserve username on edit
+    const oldUser = users[parseInt(editIdx)];
+    const oldUsername = oldUser.username;
+    if (oldUsername === 'admin' && username !== 'admin') {
+      document.getElementById('user-form-alert').innerHTML = '<div class="alert alert-error">The primary admin username cannot be changed.</div>';
+      return;
+    }
+    const duplicate = users.find((u, idx) => u.username === username && idx !== parseInt(editIdx));
+    if (duplicate) {
+      document.getElementById('user-form-alert').innerHTML = '<div class="alert alert-error">Username already taken by another user. Choose a different one.</div>';
+      return;
+    }
+    // If username changed, delete old doc
+    if (oldUsername !== username && firebaseInitialized) {
+      await fbDeleteDoc('users', oldUsername);
+    }
+    userData.id = username;
     users[parseInt(editIdx)] = userData;
-    showAlert('users-alert','success','✅ User updated successfully.');
+    showAlert('users-alert','success','\u2705 User updated successfully.');
   } else {
     if (users.find(u => u.username === username)) {
       document.getElementById('user-form-alert').innerHTML = '<div class="alert alert-error">Username already exists. Choose a different one.</div>';
       return;
     }
     users.push(userData);
-    showAlert('users-alert','success','✅ ' + (role === 'teacher' ? 'Teacher' : 'User') + ' account created: @' + username);
+    showAlert('users-alert','success','\u2705 ' + (role === 'teacher' ? 'Teacher' : 'User') + ' account created: @' + username);
   }
-  saveUsers(users);
+  await saveUsers(users);
   closeModal('user-modal');
   renderUsersPage();
 }
 
-function removeUser(i) {
-  const users = getUsers();
+async function removeUser(i) {
+  const users = await getUsers();
   if (users[i].username === 'admin') { alert('Cannot remove the primary admin.'); return; }
   if (!confirm('Remove user "' + users[i].name + '"?')) return;
-  users.splice(i, 1);
-  saveUsers(users);
+  const removed = users.splice(i, 1)[0];
+  if (firebaseInitialized) await fbDeleteDoc('users', removed.id || removed.username);
+  _cachedUsers = users;
   renderUsersPage();
   showAlert('users-alert','success','User removed.');
 }
@@ -2706,17 +2872,16 @@ async function syncUsersToFirebase() {
   const btn = document.getElementById('sync-users-btn');
   const status = document.getElementById('sync-users-status');
   btn.disabled = true; status.textContent = '⏳ Syncing...';
-  const users = getUsers();
-  const safeUsers = users.map(u => ({
-    id: u.username,
-    name: u.name, username: u.username, role: u.role,
-    dept: u.dept||'', mobile: u.mobile||'',
-    courses: (u.courses||[]).join(', ')
-  }));
-  const ok = await fbSaveCollection('users_directory', safeUsers);
+  const users = await getUsers();
+  let ok = true;
+  for (const u of users) {
+    const id = u.id || u.username;
+    const res = await fbSetDoc('users', id, {...u, id});
+    if (!res) ok = false;
+  }
   btn.disabled = false;
   status.textContent = ok
-    ? '✅ Synced '+safeUsers.length+' users at '+new Date().toLocaleTimeString()
+    ? '✅ Synced ' + users.length + ' users at ' + new Date().toLocaleTimeString()
     : '❌ Sync failed — check Firebase connection';
 }
 
@@ -2832,7 +2997,7 @@ async function exportToExcel() {
 // ============================================================
 async function pushAllToFirebase() {
   if (!firebaseInitialized) { showPullStatus('error','❌ Firebase not connected. Go to Settings → Connect Firebase first.'); return; }
-  showPullStatus('info','⏳ Pushing all local data to Firebase...');
+  showPullStatus('info','⏳ Pushing all data to Firebase...');
   const collections = [
     ['students', students],
     ['payments', payments],
@@ -2849,8 +3014,7 @@ async function pushAllToFirebase() {
   let failed = 0;
   for (const [name, arr] of collections) {
     if (!arr || !arr.length) continue;
-    const ok = await fbSaveCollection(name, arr);
-    if (!ok) failed++;
+    try { await DB.saveArray(name, arr); } catch(e) { failed++; }
   }
   if (failed === 0) {
     showPullStatus('success','✅ All data pushed to Firebase successfully!');
